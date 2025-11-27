@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import os
 import json
+import re  # 정규표현식(강력한 텍스트 필터) 모듈 추가
 from dataclasses import dataclass
 from typing import List
 
@@ -35,34 +36,29 @@ SECTIONS = {
 }
 
 # -----------------------------------------------------------------------------
-# 2. 스타일링 (CSS) - 모바일 앱 느낌 강화
+# 2. 스타일링 (CSS)
 # -----------------------------------------------------------------------------
 
 st.markdown("""
 <style>
-    /* 폰트 및 배경 - 애플 스타일의 깔끔한 산세리프 */
     @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css");
     
     html, body, [class*="css"] {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
-        background-color: #F2F4F6; /* 토스/카카오 스타일의 연한 회색 배경 */
+        background-color: #F2F4F6;
         color: #333333;
     }
-
-    /* Streamlit 기본 UI 숨기기 (진짜 앱처럼 보이게) */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;} 
     .stDeployButton {display:none;}
     
-    /* 상단 여백 제거 */
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 5rem !important;
-        max-width: 600px; /* 모바일 폭으로 제한 */
+        max-width: 600px;
     }
 
-    /* 헤더 스타일 */
     .app-header {
         background-color: white;
         padding: 1.5rem;
@@ -88,7 +84,6 @@ st.markdown("""
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
 
-    /* 뉴스 카드 스타일 (모바일 위젯 느낌) */
     .news-card {
         background-color: white;
         padding: 1.25rem;
@@ -118,7 +113,7 @@ st.markdown("""
     .source-tag {
         font-size: 0.75rem;
         font-weight: 700;
-        color: #3182F6; /* 토스 블루 */
+        color: #3182F6;
         background-color: rgba(49, 130, 246, 0.1);
         padding: 4px 8px;
         border-radius: 6px;
@@ -146,7 +141,6 @@ st.markdown("""
         margin: 0;
     }
     
-    /* 탭 스타일 커스텀 */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: transparent;
@@ -168,8 +162,6 @@ st.markdown("""
         border: none !important;
         box-shadow: 0 4px 12px rgba(49, 130, 246, 0.3);
     }
-    
-    /* 로딩 스피너 커스텀 */
     .stSpinner > div {
         border-top-color: #3182F6 !important;
     }
@@ -177,7 +169,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. 데이터 및 로직
+# 3. 데이터 및 로직 (여기가 수정됨!)
 # -----------------------------------------------------------------------------
 
 @dataclass
@@ -189,25 +181,62 @@ class NewsArticle:
     snippet: str
 
 def fetch_news_from_gemini(topic_query: str) -> List[NewsArticle]:
+    # 2.0-flash가 검색에 더 최적화되어 있으나, 안정성을 위해 1.5-flash 유지하되 도구 설정 강화
     model = genai.GenerativeModel('gemini-1.5-flash')
+    
     prompt = f"""
-      Search for the latest (last 7 days) Korean news articles about "{topic_query}". 
-      Select the 5 most relevant articles.
-      Return a raw JSON array of objects with keys: "title", "date" (YYYY.MM.DD), "source", "url", "snippet".
+      You are a news aggregator. Search for the latest Korean news articles about "{topic_query}".
+      
+      CRITICAL INSTRUCTIONS:
+      1. Find 5 distinct news articles from reputable Korean sources.
+      2. Output MUST be a valid JSON array.
+      3. Do NOT use markdown code blocks (no ```json).
+      4. Do NOT add any introductory text. Just the JSON.
+      
+      JSON Format:
+      [
+        {{
+          "title": "Headline",
+          "date": "YYYY.MM.DD",
+          "source": "Publisher Name",
+          "url": "Link",
+          "snippet": "Short summary"
+        }}
+      ]
     """
+    
     try:
-        response = model.generate_content(prompt, tools='google_search_retrieval')
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
-        articles = [NewsArticle(
-            title=item.get('title', '제목 없음'),
-            url=item.get('url', '#'),
-            source=item.get('source', 'News'),
-            date=item.get('date', ''),
-            snippet=item.get('snippet', '')
-        ) for item in data]
-        return sorted(articles, key=lambda x: x.date, reverse=True)
-    except:
+        # tools 설정을 명확하게 지정
+        response = model.generate_content(
+            prompt, 
+            tools='google_search_retrieval'
+        )
+        
+        text = response.text
+        
+        # [강력 필터] 텍스트에서 JSON 부분만 정규표현식으로 추출
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        
+        if match:
+            json_str = match.group()
+            data = json.loads(json_str)
+            
+            articles = [NewsArticle(
+                title=item.get('title', '제목 없음'),
+                url=item.get('url', '#'),
+                source=item.get('source', 'News'),
+                date=item.get('date', ''),
+                snippet=item.get('snippet', '')
+            ) for item in data]
+            
+            return sorted(articles, key=lambda x: x.date, reverse=True)
+        else:
+            # JSON을 못 찾았을 경우 에러 발생시키기 (디버깅용)
+            raise ValueError(f"JSON 형식을 찾을 수 없음: {text[:100]}...")
+            
+    except Exception as e:
+        # 화면에 에러를 출력해서 원인을 파악할 수 있게 함
+        st.error(f"뉴스 검색 중 오류 발생: {e}")
         return []
 
 # -----------------------------------------------------------------------------
@@ -218,30 +247,36 @@ def main():
     if 'news_cache' not in st.session_state:
         st.session_state.news_cache = {}
 
-    # 커스텀 헤더
     st.markdown(f"""
     <div class="app-header">
         <div>
             <div style="font-size:0.8rem; color:#8B95A1; font-weight:600; margin-bottom:2px;">KOREA RESEARCH FOUNDATION</div>
             <h1 class="app-title">NRF Insight</h1>
         </div>
-        <img src="https://www.nrf.re.kr/resources/img/contents/character/nulph_intro.png" class="mascot-img">
+        <img src="[https://www.nrf.re.kr/resources/img/contents/character/nulph_intro.png](https://www.nrf.re.kr/resources/img/contents/character/nulph_intro.png)" class="mascot-img">
     </div>
     """, unsafe_allow_html=True)
 
-    # 탭 메뉴
     tab_labels = [config['short_label'] for config in SECTIONS.values()]
     tabs = st.tabs(tab_labels)
 
     for i, (section_key, config) in enumerate(SECTIONS.items()):
         with tabs[i]:
             news_items = []
+            
+            # 새로고침 버튼 (위쪽으로 이동)
+            if st.button("🔄 뉴스 새로고침", key=f"refresh_{i}", use_container_width=True):
+                if section_key in st.session_state.news_cache:
+                    del st.session_state.news_cache[section_key]
+                st.rerun()
+
             if section_key in st.session_state.news_cache:
                 news_items = st.session_state.news_cache[section_key]
             else:
-                with st.spinner("정보를 불러오고 있어요..."):
+                with st.spinner(f"'{config['label']}' 검색 중..."):
                     news_items = fetch_news_from_gemini(config['query'])
-                    st.session_state.news_cache[section_key] = news_items
+                    if news_items:
+                        st.session_state.news_cache[section_key] = news_items
 
             if news_items:
                 for article in news_items:
@@ -256,13 +291,9 @@ def main():
                         <p class="card-snippet">{article.snippet}</p>
                     </a>
                     """, unsafe_allow_html=True)
-            else:
-                st.info("새로운 소식이 없어요!")
-                
-            # 하단 새로고침 버튼 (작게)
-            if st.button("새로고침", key=f"refresh_{i}", help="캐시 삭제 후 다시 검색"):
-                st.session_state.news_cache = {}
-                st.rerun()
+            elif section_key not in st.session_state.news_cache:
+                # 에러 메시지가 위에 떴을 테니 여기선 조용히
+                pass
 
 if __name__ == "__main__":
     main()
