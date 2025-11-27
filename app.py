@@ -198,11 +198,11 @@ st.markdown("""
 
 @dataclass
 class NewsArticle:
-    title: string
-    url: string
-    source: string
-    date: string
-    snippet: string
+    title: str
+    url: str
+    source: str
+    date: str
+    snippet: str
 
 def fetch_news_from_gemini(topic_query: str) -> List[NewsArticle]:
     """Gemini API를 사용하여 뉴스 기사를 검색하고 구조화된 데이터로 반환합니다."""
@@ -344,4 +344,5 @@ def main():
                 st.info("관련된 최신 뉴스를 찾을 수 없습니다.")
 
 if __name__ == "__main__":
+
     main()
