@@ -3,7 +3,7 @@ import google.generativeai as genai
 import os
 import json
 import datetime
-from duckduckgo_search import DDGS # 무료 검색 엔진
+from duckduckgo_search import DDGS
 from dataclasses import dataclass
 from typing import List
 
@@ -18,7 +18,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# API 키 설정
 API_KEY = os.environ.get("API_KEY") 
 if not API_KEY and "API_KEY" in st.secrets:
     API_KEY = st.secrets["API_KEY"]
@@ -29,11 +28,32 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
+# 검색어(Query)를 조금 더 구체적인 '뉴스 키워드'로 변경했습니다.
 SECTIONS = {
-    "NRF_NEWS": {"label": "한국연구재단 주요 기사", "short_label": "재단소식", "query": "한국연구재단 보도자료 성과", "icon": "🏢"},
-    "SCI_TECH": {"label": "과학기술분야 동향", "short_label": "과기동향", "query": "대한민국 과학기술 R&D 정책 기술 개발 뉴스", "icon": "⚛️"},
-    "HUMANITIES": {"label": "인문사회분야 동향", "short_label": "인문동향", "query": "대한민국 인문사회 학술 연구 지원 정책 뉴스", "icon": "📖"},
-    "UNI_SUPPORT": {"label": "대학재정지원사업 동향", "short_label": "대학지원", "query": "교육부 대학재정지원사업 RISE 글로컬대학 LINC 3.0 뉴스", "icon": "🎓"}
+    "NRF_NEWS": {
+        "label": "한국연구재단 주요 기사", 
+        "short_label": "재단소식", 
+        "query": "한국연구재단 사업 공모 선정 결과 보도자료", 
+        "icon": "🏢"
+    },
+    "SCI_TECH": {
+        "label": "과학기술분야 동향", 
+        "short_label": "과기동향", 
+        "query": "과학기술정보통신부 R&D 예산 정책 기술개발 뉴스", 
+        "icon": "⚛️"
+    },
+    "HUMANITIES": {
+        "label": "인문사회분야 동향", 
+        "short_label": "인문동향", 
+        "query": "인문사회 학술연구지원사업 정책 동향 뉴스", 
+        "icon": "📖"
+    },
+    "UNI_SUPPORT": {
+        "label": "대학재정지원사업 동향", 
+        "short_label": "대학지원", 
+        "query": "교육부 대학지원사업 RISE 글로컬대학3.0 선정 뉴스", 
+        "icon": "🎓"
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -170,7 +190,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. 데이터 및 로직 (DDG 검색 + Gemini 요약)
+# 3. 데이터 및 로직 (핵심 수정됨)
 # -----------------------------------------------------------------------------
 
 @dataclass
@@ -182,44 +202,50 @@ class NewsArticle:
     snippet: str
 
 def fetch_news_hybrid(topic_query: str) -> List[NewsArticle]:
-    """1. DuckDuckGo로 검색하고 2. Gemini가 정리합니다."""
-    
-    # 1. 검색 (DuckDuckGo)
     raw_results = []
+    
+    # [수정됨] .text() 대신 .news() 함수를 사용해서 진짜 '뉴스'만 가져옵니다.
     try:
         with DDGS() as ddgs:
-            # 최근 한국 뉴스 검색
-            search_gen = ddgs.text(
-                f"{topic_query}", 
-                region='kr-kr', 
-                timelimit='w', # 지난주 (d:하루, w:주, m:달)
+            # region='kr-kr'로 한국 뉴스만 타겟팅
+            news_gen = ddgs.news(
+                keywords=topic_query,
+                region='kr-kr',
+                safesearch='off',
                 max_results=5
             )
-            for r in search_gen:
+            for r in news_gen:
                 raw_results.append(r)
     except Exception as e:
-        st.error(f"검색 엔진 오류: {e}")
-        return []
+        print(f"News Search Error: {e}")
+        # 뉴스 검색 실패시 일반 검색으로 백업 시도 (하지만 '뉴스' 키워드 추가)
+        try:
+            with DDGS() as ddgs:
+                text_gen = ddgs.text(f"{topic_query} 뉴스", region='kr-kr', max_results=5)
+                for r in text_gen:
+                    raw_results.append(r)
+        except:
+            pass
 
     if not raw_results:
         return []
 
-    # 2. 정리 (Gemini)
-    # 검색된 날것의 데이터를 AI에게 주고 예쁘게 다듬어달라고 요청
+    # AI에게 데이터 정리 요청
     model = genai.GenerativeModel('gemini-1.5-flash')
     
+    # AI가 헷갈리지 않게 데이터 구조를 설명해주는 프롬프트
     prompt = f"""
-    Here is a list of search results about "{topic_query}":
+    Here is a raw list of search results about "{topic_query}":
     {json.dumps(raw_results, ensure_ascii=False)}
 
-    Please convert this data into a JSON array of news objects.
-    - "title": Clean up the title (remove '...' or site names if possible).
-    - "date": Use today's date ({datetime.date.today().strftime('%Y.%m.%d')}) if not specified.
-    - "source": Extract media/source name from title or body.
-    - "url": The 'href'.
-    - "snippet": Summarize the 'body' into 1 sentence in Korean.
+    Please convert this into a JSON array of news objects.
+    - "title": Clean up the headline.
+    - "date": If the source has a date, use it. If not, use "{datetime.date.today().strftime('%Y.%m.%d')}".
+    - "source": Extract the press/media name (e.g. 연합뉴스, 전자신문).
+    - "url": The direct link.
+    - "snippet": Summarize the content into 1 simple Korean sentence.
 
-    Return ONLY the JSON array. No markdown.
+    IMPORTANT: Return ONLY the JSON array. No markdown, no code blocks.
     """
     
     try:
@@ -237,15 +263,26 @@ def fetch_news_hybrid(topic_query: str) -> List[NewsArticle]:
         
         return articles
     except Exception as e:
-        # AI 변환 실패 시 검색 결과 그대로 보여주기 (백업)
+        # AI 변환 실패 시 원본 데이터로 최대한 보여주기
         fallback = []
         for r in raw_results:
+            # ddgs.news와 ddgs.text의 리턴 키값이 조금 다를 수 있어 처리
+            title = r.get('title')
+            url = r.get('url') or r.get('href')
+            source = r.get('source') or 'Search'
+            body = r.get('body') or r.get('snippet') or ''
+            date = r.get('date') or datetime.date.today().strftime('%m.%d')
+            
+            # 날짜 포맷이 이상하게 길면 자르기
+            if date and len(str(date)) > 10:
+                date = str(date)[:10]
+
             fallback.append(NewsArticle(
-                title=r.get('title'),
-                url=r.get('href'),
-                source='Search',
-                date=datetime.date.today().strftime('%m.%d'),
-                snippet=r.get('body')
+                title=title,
+                url=url,
+                source=source,
+                date=date,
+                snippet=body
             ))
         return fallback
 
@@ -282,7 +319,7 @@ def main():
             if section_key in st.session_state.news_cache:
                 news_items = st.session_state.news_cache[section_key]
             else:
-                with st.spinner(f"'{config['label']}' 검색 중..."):
+                with st.spinner(f"'{config['short_label']}' 관련 최신 기사를 찾는 중..."):
                     news_items = fetch_news_hybrid(config['query'])
                     if news_items:
                         st.session_state.news_cache[section_key] = news_items
