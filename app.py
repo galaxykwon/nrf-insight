@@ -250,7 +250,7 @@ def main():
     st.markdown(f"""
     <div class="app-header">
         <div>
-            <div style="font-size:0.8rem; color:#8B95A1; font-weight:600; margin-bottom:2px;">KOREA RESEARCH FOUNDATION</div>
+            <div style="font-size:0.8rem; color:#8B95A1; font-weight:600; margin-bottom:2px;">National Research Foundation of KOREA</div>
             <h1 class="app-title">NRF Insight</h1>
         </div>
         <img src="[https://www.nrf.re.kr/resources/img/contents/character/nulph_intro.png](https://www.nrf.re.kr/resources/img/contents/character/nulph_intro.png)" class="mascot-img">
@@ -297,4 +297,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
