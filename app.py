@@ -182,7 +182,7 @@ class NewsArticle:
 
 def fetch_news_from_gemini(topic_query: str) -> List[NewsArticle]:
     # 2.0-flash가 검색에 더 최적화되어 있으나, 안정성을 위해 1.5-flash 유지하되 도구 설정 강화
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
     
     prompt = f"""
       You are a news aggregator. Search for the latest Korean news articles about "{topic_query}".
@@ -297,3 +297,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
